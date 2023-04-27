@@ -225,7 +225,7 @@ fun mainUI() {
     var listOfDone by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    if (status == "") compressSettingsUI()
+    //if (status == "") compressSettingsUI()
 
     Column(
         modifier = Modifier.padding(4.dp).fillMaxSize(),
