@@ -1,5 +1,3 @@
-@file:Suppress("unused", "unused", "unused", "unused")
-
 package compressor
 
 import kotlinx.coroutines.*

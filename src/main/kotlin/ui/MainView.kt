@@ -1,5 +1,3 @@
-@file:Suppress("unused", "unused", "unused")
-
 package ui
 
 import androidx.compose.foundation.background

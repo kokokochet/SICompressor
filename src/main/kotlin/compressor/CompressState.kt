@@ -69,4 +69,32 @@ data class CompressState(
         )
     }
 
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as CompressState
+
+        if (compressInProgress != other.compressInProgress) return false
+        if (progress != other.progress) return false
+        if (stringStatus != other.stringStatus) return false
+        if (previousFilePath != other.previousFilePath) return false
+        if (settings != other.settings) return false
+        if (processedCount != other.processedCount) return false
+        if (filesCount != other.filesCount) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = compressInProgress.hashCode()
+        result = 31 * result + progress.hashCode()
+        result = 31 * result + stringStatus.hashCode()
+        result = 31 * result + (previousFilePath?.hashCode() ?: 0)
+        result = 31 * result + settings.hashCode()
+        result = 31 * result + processedCount
+        result = 31 * result + filesCount
+        return result
+    }
+
 }
