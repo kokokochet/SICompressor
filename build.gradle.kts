@@ -16,7 +16,7 @@ repositories {
 
 dependencies {
     implementation(compose.desktop.common)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1")
     implementation("com.twelvemonkeys:twelvemonkeys:3.9.3")
     implementation("org.imgscalr:imgscalr-lib:4.2")
     implementation("org.zeroturnaround:zt-zip:1.15")
@@ -45,7 +45,7 @@ compose.desktop {
     application {
         mainClass = "MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Msi)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi)
             packageVersion = "1.7.0"
             packageName = "SICompressor"
             modules("java.instrument", "jdk.unsupported")
