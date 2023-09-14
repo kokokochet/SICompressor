@@ -1,8 +1,8 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("jvm") version "1.8.20"
-    id("org.jetbrains.compose") version "1.4.0"
+    kotlin("jvm") version "1.9.10"
+    id("org.jetbrains.compose") version "1.5.1"
 }
 
 group = "com.example"
@@ -46,7 +46,7 @@ compose.desktop {
         mainClass = "MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi)
-            packageVersion = "1.7.0"
+            packageVersion = "1.7.1"
             packageName = "SICompressor"
             modules("java.instrument", "jdk.unsupported")
             windows {
