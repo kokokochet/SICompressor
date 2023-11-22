@@ -1,5 +1,5 @@
 # SICompressor
-
+Скачать можно тут -- [https://github.com/kokokochet/SICompressor/releases](https://github.com/kokokochet/SICompressor/releases)
 ![экран приложения](screenshot.png)
 
 Простое приложение для сжатия паков игры Владимира Хиля SIGame - https://vladimirkhil.com/si/game
