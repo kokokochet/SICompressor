@@ -1,8 +1,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("jvm") version "1.9.10"
-    id("org.jetbrains.compose") version "1.5.1"
+    kotlin("jvm") version "2.3.10"
+    id("org.jetbrains.compose") version "1.10.1"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
 }
 
 group = "com.example"
@@ -21,18 +22,18 @@ dependencies {
     implementation("org.imgscalr:imgscalr-lib:4.2")
     implementation("org.zeroturnaround:zt-zip:1.15")
     implementation("org.slf4j:slf4j-nop:2.0.5")
-    implementation("ws.schild:jave-core:3.3.1")
+    implementation("ws.schild:jave-core:3.5.0")
     //win
     implementation(compose.desktop.windows_x64)
-    implementation("ws.schild:jave-nativebin-win64:3.3.1")
+    implementation("ws.schild:jave-nativebin-win64:3.5.0")
     //linux
-    implementation("ws.schild:jave-nativebin-linux-arm64:3.3.1")
-    implementation("ws.schild:jave-nativebin-linux64:3.3.1")
+    implementation("ws.schild:jave-nativebin-linux-arm64:3.5.0")
+    implementation("ws.schild:jave-nativebin-linux64:3.5.0")
     implementation(compose.desktop.linux_x64)
     implementation(compose.desktop.linux_arm64)
     //macos
-    implementation("ws.schild:jave-nativebin-osxm1:3.3.1")
-    implementation("ws.schild:jave-nativebin-osx64:3.3.1")
+    implementation("ws.schild:jave-nativebin-osxm1:3.5.0")
+    implementation("ws.schild:jave-nativebin-osx64:3.5.0")
     implementation(compose.desktop.macos_arm64)
     implementation(compose.desktop.macos_x64)
 }

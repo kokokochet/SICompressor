@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.res.useResource
 import androidx.compose.ui.unit.dp
@@ -15,34 +18,41 @@ import compressor.CompressState
 import compressor.compress
 import kotlinx.coroutines.launch
 import java.awt.FileDialog
+import java.awt.dnd.DnDConstants
+import java.awt.dnd.DropTarget
+import java.awt.dnd.DropTargetAdapter
+import java.awt.dnd.DropTargetDropEvent
+import java.awt.datatransfer.DataFlavor
 import java.io.File
-import java.net.URI
 import java.util.*
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun packSelectField(siFileSet: (File?) -> Unit) {
-    var isDragging by remember { mutableStateOf(false) }
-
     textButton(
         "ВЫБОР ПАКА (или перетащи на меня пак)",
         modifier = Modifier.padding(10.dp)
-            .onExternalDrag(
-                onDragStart = { isDragging = true },
-                onDragExit = { isDragging = false },
-                onDrag = {},
-                onDrop = { state ->
-                    val dragData = state.dragData
-                    if (dragData is DragData.FilesList) {
-                        siFileSet(
-                            File(URI(dragData.readFiles().first()))
-                        )
-                    }
-                    isDragging = false
-                }
-            )
     ) {
         siFileSet(openFileDialog(ComposeWindow(), "выбор пака"))
+    }
+}
+
+// Функция для установки drop target на окно
+fun setupDropTarget(window: java.awt.Window, onFileDropped: (File) -> Unit) {
+    window.dropTarget = DropTarget().apply {
+        addDropTargetListener(object : DropTargetAdapter() {
+            override fun drop(event: DropTargetDropEvent) {
+                event.acceptDrop(DnDConstants.ACTION_COPY)
+                val transferable = event.transferable
+                if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                    @Suppress("UNCHECKED_CAST")
+                    val files = transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+                    if (files.isNotEmpty()) {
+                        onFileDropped(files.first())
+                    }
+                }
+                event.dropComplete(true)
+            }
+        })
     }
 }
 
@@ -103,9 +113,16 @@ fun app() = application {
 
         mainView(state) {
             scope.launch {
-                compress(state.settings, it, state) { newState ->
-                    state = newState
-                    newState
+                try {
+                    compress(state.settings, it, state) { newState ->
+                        state = newState
+                        newState
+                    }
+                } catch (e: Exception) {
+                    state = state.copy(
+                        stringStatus = "Ошибка: ${e.message ?: "неизвестная ошибка"}",
+                        compressInProgress = false
+                    )
                 }
             }
         }

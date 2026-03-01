@@ -1,6 +1,7 @@
 package compressor
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
 import org.imgscalr.Scalr
 import org.zeroturnaround.zip.ZipUtil
 import org.zeroturnaround.zip.commons.FileUtils
@@ -9,11 +10,11 @@ import ws.schild.jave.MultimediaObject
 import ws.schild.jave.encode.AudioAttributes
 import ws.schild.jave.encode.EncodingAttributes
 import ws.schild.jave.encode.VideoAttributes
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import javax.imageio.ImageIO
@@ -22,47 +23,110 @@ import kotlin.io.path.createTempDirectory
 import kotlin.io.path.extension
 import kotlin.io.path.name
 
+/**
+ * Snapshot of settings for thread-safe access during compression.
+ * Created once at the start of compression to prevent issues with mutable SettingsState.
+ */
+data class SettingsSnapshot(
+    val videoCodec: String,
+    val videoBitrate: Int,
+    val audioBitrate: Int,
+    val cpuCores: Int,
+    val imageResolution: Int,
+    val audioChannels: Int,
+    val samplingRate: Int
+) {
+    companion object {
+        fun fromSettings(settings: SettingsState): SettingsSnapshot = SettingsSnapshot(
+            videoCodec = settings.videoCodec.currentValue,
+            videoBitrate = settings.videoBitrate.currentValue,
+            audioBitrate = settings.audioBitrate.currentValue,
+            cpuCores = settings.cpuCores.currentValue,
+            imageResolution = settings.imageResolution.currentValue,
+            audioChannels = settings.audioChannels,
+            samplingRate = settings.samplingRate
+        )
+    }
+}
+
 suspend fun compress(
     set: SettingsState,
     siGameFile: File,
     initialState: CompressState,
-    onProgress: (CompressState) -> CompressState // consumes state and returns it
+    onProgress: (CompressState) -> CompressState
 ) = withContext(Dispatchers.IO) {
+    // Create immutable snapshot of settings to prevent race conditions
+    val settings = SettingsSnapshot.fromSettings(set)
+    
+    // Use AtomicInteger for thread-safe counter, and lock for state updates
+    val processedCount = AtomicInteger(0)
+    val lock = Any()
     var curState = initialState
+    
+    // Thread-safe progress update
+    fun reportProgress() {
+        synchronized(lock) {
+            val count = processedCount.incrementAndGet()
+            val newProgress = CompressState.START_PROGRESS +
+                    (count.toFloat() / curState.filesCount) * (CompressState.COMPRESS_DONE_PROGRESS - CompressState.START_PROGRESS)
+            val statusIndex = minOf(
+                ((count.toFloat() / curState.filesCount) * curState.funStatuses.lastIndex).toInt(),
+                curState.funStatuses.lastIndex
+            )
+            curState = onProgress(curState.copy(
+                processedCount = count,
+                progress = newProgress,
+                stringStatus = curState.funStatuses[statusIndex]
+            ))
+        }
+    }
+    
     curState = onProgress(curState.unpackingStart())
     val tmpFolder = createTempDirectory(prefix = "temp").toFile()
-    tmpFolder.deleteOnExit()
-    unZipPack(siGameFile, tmpFolder)
-    curState = onProgress(
-        curState.unpackingDone(
-            tmpFolder.listFiles()?.flatMap { it.listFiles()?.toList() ?: listOf() }?.count() ?: 1
-        )
-    )
+    
+    try {
+        tmpFolder.deleteOnExit()
+        unZipPack(siGameFile, tmpFolder)
+        
+        val filesCount = tmpFolder.listFiles()?.sumOf { it.listFiles()?.size ?: 0 } ?: 1
+        synchronized(lock) {
+            curState = onProgress(curState.unpackingDone(filesCount))
+        }
 
-    runBlocking(Dispatchers.IO) {
-        tmpFolder.listFiles()?.forEach {
-            when (it.name) {
-                "Video" -> launch {
-                    videoFiles(set, it!!.listFiles()!!) { curState = onProgress(curState.oneFileDone()) }
-                }
+        // Use coroutineScope instead of runBlocking for structured concurrency
+        coroutineScope {
+            tmpFolder.listFiles()?.forEach { folder ->
+                when (folder.name) {
+                    "Video" -> launch {
+                        videoFiles(settings, folder.listFiles() ?: emptyArray()) { 
+                            reportProgress()
+                        }
+                    }
 
-                "Audio" -> launch {
-                    audioFiles(set, it!!.listFiles()!!) { curState = onProgress(curState.oneFileDone()) }
-                }
+                    "Audio" -> launch {
+                        audioFiles(settings, folder.listFiles() ?: emptyArray()) {
+                            reportProgress()
+                        }
+                    }
 
-                "Images" -> launch {
-                    imageFiles(this, set, it!!.listFiles()!!) { curState = onProgress(curState.oneFileDone()) }
+                    "Images" -> launch {
+                        imageFiles(this, settings, folder.listFiles() ?: emptyArray()) {
+                            reportProgress()
+                        }
+                    }
                 }
             }
         }
+
+        curState = onProgress(curState.startPacking())
+
+        val newSIGameFile = File(siGameFile.parent + "/compressed" + siGameFile.name)
+        ZipUtil.pack(tmpFolder, newSIGameFile)
+        curState = onProgress(curState.compressDone(newSIGameFile.absolutePath))
+    } finally {
+        // Always clean up temporary files, even on error
+        tmpFolder.deleteRecursively()
     }
-
-    curState = onProgress(curState.startPacking())
-
-    val newSIGameFile = File(siGameFile.parent + "/compressed" + siGameFile.name)
-    ZipUtil.pack(tmpFolder, newSIGameFile)
-    curState = onProgress(curState.compressDone(newSIGameFile.absolutePath))
-    tmpFolder.deleteRecursively()
 }
 
 private fun fixURLName(contentXML: StringBuilder, zipEntry: ZipEntry): String {
@@ -87,7 +151,8 @@ private fun unZipPack(siGameFile: File, targetFolder: File) {
         FileUtils.deleteDirectory(targetFolder)
         val contentXML = StringBuilder(String(ZipUtil.unpackEntry(siGameFile, "content.xml")))
         val zipStream = ZipInputStream(siGameFile.inputStream())
-        val buffer = ByteArray(4 * 1024)
+        // Increased buffer size from 4KB to 64KB for better performance
+        val buffer = ByteArray(64 * 1024)
         zipStream.use { stream ->
             var zipEntry = stream.nextEntry
 
@@ -116,37 +181,43 @@ private fun unZipPack(siGameFile: File, targetFolder: File) {
     }
 }
 
-private fun videoFiles(set: SettingsState, files: Array<File>, progress: () -> Unit) {
+private fun videoFiles(set: SettingsSnapshot, files: Array<File>, progress: () -> Unit) {
+    // Create encoder attributes once, reuse in loop
     val video = VideoAttributes()
-    video.setCodec(set.videoCodec.currentValue)
+    video.setCodec(set.videoCodec)
 
     val attrs = EncodingAttributes()
     attrs.setInputFormat("mp4")
     attrs.setOutputFormat("mp4")
-    attrs.setEncodingThreads(set.cpuCores.currentValue)
-    attrs.setDecodingThreads(set.cpuCores.currentValue)
-
+    attrs.setEncodingThreads(set.cpuCores)
+    attrs.setDecodingThreads(set.cpuCores)
+    
+    // Each coroutine has its own encoder instance for thread-safety
     val encoder = Encoder()
 
     for (file in files) {
         val typeCheck = file.extension
-        if (typeCheck != "mp4")
+        if (typeCheck != "mp4") {
+            progress()
             continue
+        }
         val tmpFile = File(file.parent + "/tmp" + file.name)
         try {
             val mFile = MultimediaObject(file)
             val videoCurAttr = mFile.info.video
-            if (videoCurAttr.bitRate <= set.videoBitrate.currentValue)
+            if (videoCurAttr.bitRate <= set.videoBitrate) {
+                progress()
                 continue
+            }
 
             video.setSize(videoCurAttr.size)
-            video.setBitRate(set.videoBitrate.currentValue)
+            video.setBitRate(set.videoBitrate)
             video.setFrameRate(videoCurAttr.frameRate.toInt())
 
             val audioCurAttr = mFile.info.audio
             val audio = AudioAttributes()
             audio.setCodec("libmp3lame")
-            audio.setBitRate(minOf(set.videoBitrate.currentValue, audioCurAttr.bitRate))
+            audio.setBitRate(minOf(set.videoBitrate, audioCurAttr.bitRate))
             audio.setChannels(set.audioChannels)
             audio.setSamplingRate(audioCurAttr.samplingRate)
 
@@ -164,10 +235,11 @@ private fun videoFiles(set: SettingsState, files: Array<File>, progress: () -> U
     }
 }
 
-private fun audioFiles(set: SettingsState, files: Array<File>, progress: () -> Unit) {
+private fun audioFiles(set: SettingsSnapshot, files: Array<File>, progress: () -> Unit) {
+    // Create encoder attributes once, reuse in loop
     val audio = AudioAttributes()
     audio.setCodec("libmp3lame")
-    audio.setBitRate(set.audioBitrate.currentValue)
+    audio.setBitRate(set.audioBitrate)
     audio.setChannels(set.audioChannels)
     audio.setSamplingRate(set.samplingRate)
 
@@ -176,6 +248,7 @@ private fun audioFiles(set: SettingsState, files: Array<File>, progress: () -> U
     attrs.setOutputFormat("mp3")
     attrs.setAudioAttributes(audio)
 
+    // Each coroutine has its own encoder instance for thread-safety
     val encoder = Encoder()
 
     for (file in files) {
@@ -189,33 +262,48 @@ private fun audioFiles(set: SettingsState, files: Array<File>, progress: () -> U
                 file.delete()
                 tmpFile.renameTo(file)
             } catch (_: Exception) {
+                tmpFile.delete()
             } finally {
                 progress()
             }
+        } else {
+            // Log unsupported audio formats but still count them
+            progress()
         }
     }
 }
 
-private fun imageFiles(corScope: CoroutineScope, set: SettingsState, files: Array<File>, progress: () -> Unit) {
+private fun imageFiles(corScope: CoroutineScope, set: SettingsSnapshot, files: Array<File>, progress: () -> Unit) {
+    // Limit parallelism to available processors to prevent OOM and CPU contention
+    val parallelism = Runtime.getRuntime().availableProcessors()
+    val semaphore = Semaphore(parallelism)
+
     for (file in files) {
+        // Skip GIF files - don't count them in progress
         if (file.extension == "gif") {
             continue
         }
+        
         corScope.launch {
+            semaphore.acquire()
             try {
-                val originalImage = withContext(Dispatchers.IO) {
-                    ImageIO.read(ByteArrayInputStream(file.readBytes()))
+                // Read image directly from file instead of loading entire file into memory first
+                val originalImage = withContext(Dispatchers.Default) {
+                    ImageIO.read(file)
                 } ?: return@launch
-                val currentDimension =
-                    minOf(set.imageResolution.currentValue, maxOf(originalImage.height, originalImage.width))
-                val resizedImage = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, currentDimension)
+                
+                val currentDimension = minOf(set.imageResolution, maxOf(originalImage.height, originalImage.width))
+                val resizedImage = withContext(Dispatchers.Default) {
+                    Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, currentDimension)
+                }
 
                 withContext(Dispatchers.IO) {
                     ImageIO.write(resizedImage, "jpg", file)
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 return@launch
             } finally {
+                semaphore.release()
                 progress()
             }
         }

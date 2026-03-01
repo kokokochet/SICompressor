@@ -15,7 +15,7 @@ import compressor.SettingsState
 
 data class Explanation(
     val actual: String? = null,
-    val default: String = "тут будут пояснения если навести на настроки"
+    val default: String = "тут будут пояснения если навести на настройки"
 )
 
 @Composable
