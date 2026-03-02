@@ -16,11 +16,12 @@ class SettingsState {
     }
 
     val videoCodec = SettingProperty(
-        "libx264", listOf("libx264", "h264_nvenc", "h264_amf", "h264_qsv"),
+        "libx264", listOf("libx264", "h264_nvenc", "h264_amf", "h264_qsv", "h264_videotoolbox"),
         explanations = "позволяет включить аппаратное ускорение для обработки видео на видеокарте\n" +
                 "h264_nvenc - для nvidia\n" +
                 "h264_amf - для AMD\n" +
                 "h264_qsv - для Intel\n" +
+                "h264_videotoolbox - для Apple Silicon (M1/M2/M3)\n" +
                 "libx264 - если не уверены, будет работать на процессоре",
         toT = { it }
     )
